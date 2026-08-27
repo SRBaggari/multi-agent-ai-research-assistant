@@ -1,0 +1,44 @@
+.agent {
+
+  margin-top: 15px;
+
+  padding: 10px;
+
+  background: #eef2ff;
+
+  border-radius: 8px;
+}
+
+
+.sources {
+
+  margin-top: 25px;
+
+  border-top: 1px solid #ddd;
+
+  padding-top: 15px;
+}
+
+
+.source {
+
+  display: flex;
+
+  justify-content: space-between;
+
+  padding: 12px;
+
+  margin-bottom: 8px;
+
+  background: #f9fafb;
+
+  border-radius: 6px;
+
+  border: 1px solid #e5e7eb;
+}
+
+
+.source span {
+
+  color: #6b7280;
+}
