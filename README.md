@@ -284,6 +284,13 @@ OPENAI_BASE_URL=https://openrouter.ai/api/v1
 OPENAI_MODEL=meta-llama/llama-3.3-70b-instruct:free
 ```
 
+```
+# Ollama (fully offline, no API key and no internet)
+OPENAI_API_KEY=ollama
+OPENAI_BASE_URL=http://localhost:11434/v1
+OPENAI_MODEL=llama3.2:3b
+```
+
 Then restart the backend. Leave `OPENAI_BASE_URL` blank to go back to OpenAI.
 
 `OPENAI_MODEL` must name a model the chosen provider actually offers; if it
@@ -291,6 +298,38 @@ does not, `/research/ask` returns a 502 naming the model and the endpoint.
 
 Only the answer-generation step changes. Embeddings stay local
 (Sentence-Transformers), so retrieval and citations are unaffected.
+
+### Running fully offline with Ollama
+
+Everything except answer generation already runs without an API key: PDF
+parsing, chunking, embeddings, FAISS retrieval, the supervisor's routing,
+authentication and the paper list. Ollama removes the last dependency, which is
+useful for demoing somewhere with no reliable internet.
+
+```powershell
+winget install Ollama.Ollama
+ollama pull llama3.2:3b
+```
+
+Then set the three Ollama values above and restart the backend. `OPENAI_API_KEY`
+is not used by Ollama, but it must not be empty, so any placeholder works.
+
+**Measured on a 4 GB laptop GPU (RTX 3050) with `llama3.2:3b`:**
+
+| `top_k` | Time per question |
+|---|---|
+| 5 | ~113 s |
+| 3 | ~39 s |
+| 2 | ~19 s |
+
+The model is 2 GB, so on a 4 GB card most of it fits on the GPU and the rest
+spills to the CPU. Response time is dominated by how much context you send, so
+**lower `top_k` to 3 when running locally** — the "Sources to use" box on the
+dashboard controls this.
+
+Be aware of the trade-off: a 3B local model gives noticeably shorter and less
+accurate answers than a hosted model. Use Ollama as an offline fallback, and a
+hosted provider when you have internet.
 
 ---
 
