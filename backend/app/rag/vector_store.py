@@ -172,12 +172,38 @@ class VectorStore:
     # Reading
     # ----------------------------------------------
 
-    def search(self, query_embedding, top_k: int = 5):
-        """Return the top_k most similar chunks, or [] when empty."""
+    def list_paper_ids(self) -> list:
+        """Every paper_id currently present in the index."""
+
+        self.reload_if_changed()
+
+        seen = []
+
+        for item in self.metadata:
+            pid = item.get("paper_id")
+            if pid and pid not in seen:
+                seen.append(pid)
+
+        return seen
+
+    def search(self, query_embedding, top_k: int = 5, paper_ids=None):
+        """
+        Return the top_k most similar chunks, or [] when empty.
+
+        When paper_ids is given, only chunks belonging to those papers
+        are considered. IndexFlatL2 has no metadata filter, so the whole
+        index is scored and the unwanted chunks are dropped afterwards.
+        That is exact, and fine for a corpus of this size.
+        """
 
         self.reload_if_changed()
 
         if self.index is None or self.index.ntotal == 0:
+            return []
+
+        allowed = set(paper_ids) if paper_ids else None
+
+        if allowed is not None and not allowed:
             return []
 
         query_embedding = np.asarray(query_embedding, dtype="float32")
@@ -191,10 +217,14 @@ class VectorStore:
                 "Delete the vector_store folder and re-upload the papers."
             )
 
-        # Never ask FAISS for more neighbours than it holds.
-        top_k = max(1, min(int(top_k), self.index.ntotal))
+        wanted = max(1, int(top_k))
 
-        distances, indices = self.index.search(query_embedding, top_k)
+        # Filtering needs the full ranking, because the nearest chunks
+        # overall may all belong to papers the caller excluded.
+        # Never ask FAISS for more neighbours than it holds.
+        fetch = self.index.ntotal if allowed is not None else min(wanted, self.index.ntotal)
+
+        distances, indices = self.index.search(query_embedding, fetch)
 
         results = []
 
@@ -206,11 +236,19 @@ class VectorStore:
             if position < 0 or position >= len(self.documents):
                 continue
 
+            metadata = self.metadata[position]
+
+            if allowed is not None and metadata.get("paper_id") not in allowed:
+                continue
+
             results.append({
                 "text": self.documents[position],
-                "metadata": self.metadata[position],
+                "metadata": metadata,
                 "distance": float(distance),
             })
+
+            if len(results) >= wanted:
+                break
 
         return results
 

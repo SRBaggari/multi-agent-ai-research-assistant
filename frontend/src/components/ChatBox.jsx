@@ -19,7 +19,7 @@ const AGENT_LABELS = {
   summarizer: "Summarizer Agent",
 };
 
-function ChatBox({ indexedChunks }) {
+function ChatBox({ indexedChunks, totalPapers, selectedPapers }) {
   const [question, setQuestion] = useState("");
   const [topK, setTopK] = useState(6);
 
@@ -29,6 +29,10 @@ function ChatBox({ indexedChunks }) {
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [papersUsed, setPapersUsed] = useState([]);
+
+  const selectedIds = selectedPapers.map((paper) => paper.paper_id);
+  const canCompare = selectedPapers.length > 1;
 
   const ask = async () => {
     setError("");
@@ -38,17 +42,24 @@ function ChatBox({ indexedChunks }) {
       return;
     }
 
+    if (selectedPapers.length === 0) {
+      setError("Select at least one paper to ask about.");
+      return;
+    }
+
     try {
       setLoading(true);
       setAnswer("");
       setAgent("");
       setSources([]);
+      setPapersUsed([]);
 
-      const result = await askQuestion(question.trim(), topK);
+      const result = await askQuestion(question.trim(), topK, selectedIds);
 
       setAnswer(result.answer);
       setAgent(result.agent);
       setSources(result.sources || []);
+      setPapersUsed(result.papers_used || []);
     } catch (requestError) {
       // Show the real reason from the backend, not a generic message.
       setError(getErrorMessage(requestError));
@@ -64,6 +75,28 @@ function ChatBox({ indexedChunks }) {
       {indexedChunks === 0 && (
         <p className="muted" data-testid="no-papers-hint">
           Upload at least one PDF before asking a question.
+        </p>
+      )}
+
+      {indexedChunks > 0 && (
+        <p className="muted scope" data-testid="question-scope">
+          {selectedPapers.length === 0
+            ? "No papers selected - tick one in the list to the left."
+            : `Asking about ${selectedPapers.length} of ${totalPapers} paper${
+                totalPapers === 1 ? "" : "s"
+              }: ${selectedPapers.map((p) => p.filename).join(", ")}`}
+        </p>
+      )}
+
+      {totalPapers > 1 && !canCompare && (
+        <p className="muted" data-testid="compare-hint">
+          Select two or more papers to compare them.
+        </p>
+      )}
+
+      {totalPapers === 1 && (
+        <p className="muted" data-testid="compare-hint">
+          Upload a second paper to use the Comparison agent.
         </p>
       )}
 
@@ -93,7 +126,10 @@ function ChatBox({ indexedChunks }) {
       </div>
 
       <div className="examples">
-        {EXAMPLES.map((example) => (
+        {EXAMPLES.filter(
+          (example) =>
+            canCompare || !example.toLowerCase().startsWith("compare")
+        ).map((example) => (
           <button
             key={example}
             type="button"
@@ -120,6 +156,12 @@ function ChatBox({ indexedChunks }) {
       {agent && (
         <div className="agent" data-testid="agent-used">
           <strong>Agent used:</strong> {AGENT_LABELS[agent] || agent}
+          {papersUsed.length > 0 && (
+            <span className="muted">
+              {" "}
+              &middot; based on {papersUsed.join(", ")}
+            </span>
+          )}
         </div>
       )}
 

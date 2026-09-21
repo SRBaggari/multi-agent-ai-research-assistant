@@ -12,7 +12,16 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
 }
 
-function PaperList({ papers, loading, error, indexedChunks, onChanged }) {
+function PaperList({
+  papers,
+  loading,
+  error,
+  indexedChunks,
+  selectedIds,
+  onToggleSelect,
+  onSelectAll,
+  onChanged,
+}) {
   const [deletingId, setDeletingId] = useState(null);
   const [deleteError, setDeleteError] = useState("");
 
@@ -41,9 +50,29 @@ function PaperList({ papers, loading, error, indexedChunks, onChanged }) {
     }
   };
 
+  const allSelected =
+    papers.length > 0 && selectedIds.length === papers.length;
+
   return (
     <div className="card">
       <h2>Uploaded papers</h2>
+
+      {papers.length > 1 && (
+        <div className="select-bar">
+          <label className="inline">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() => onSelectAll(!allSelected)}
+              data-testid="select-all"
+            />
+            {allSelected ? "All papers selected" : "Select all"}
+          </label>
+          <span className="muted">
+            {selectedIds.length} of {papers.length} selected
+          </span>
+        </div>
+      )}
 
       {loading && <p className="muted">Loading papers...</p>}
 
@@ -71,6 +100,15 @@ function PaperList({ papers, loading, error, indexedChunks, onChanged }) {
 
       {papers.map((paper) => (
         <div className="paper" key={paper.paper_id} data-testid="paper-row">
+          <input
+            type="checkbox"
+            className="paper-select"
+            checked={selectedIds.includes(paper.paper_id)}
+            onChange={() => onToggleSelect(paper.paper_id)}
+            aria-label={`Include ${paper.filename} in questions`}
+            data-testid="paper-checkbox"
+          />
+
           <div className="paper-info">
             <strong>{paper.filename}</strong>
             <span className="muted">

@@ -18,7 +18,7 @@ from pymongo.errors import PyMongoError
 from app.api.auth import get_optional_user
 
 from app.agents.llm import LLMError
-from app.agents.supervisor import build_graph
+from app.agents.supervisor import build_graph, classify_query
 
 from app.rag.embeddings import EmbeddingError
 from app.rag.retriever import Retriever
@@ -54,6 +54,14 @@ class ResearchQuery(BaseModel):
         ge=1,
         le=MAX_TOP_K,
         description="How many paper chunks to use as context."
+    )
+
+    paper_ids: list[str] | None = Field(
+        default=None,
+        description=(
+            "Limit the question to these papers. Leave it out to search "
+            "every uploaded paper. Select two or more to compare them."
+        )
     )
 
 
@@ -97,8 +105,36 @@ def ask_research_question(
     # 2. Retrieve the relevant chunks
     # ---------------------------------------------
 
+    # Which papers is this question about?
+    available = retriever.list_paper_ids()
+
+    if request.paper_ids:
+        selected = [pid for pid in request.paper_ids if pid in available]
+
+        if not selected:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "None of the selected papers are in the search index. "
+                    "Refresh the paper list and try again."
+                )
+            )
+    else:
+        selected = available
+
+    # The supervisor decides the agent from the same deterministic rule,
+    # so asking here does not change which agent ends up running.
+    agent_hint = classify_query({"query": query}).get("agent", "qa")
+
+    # A comparison needs material from every paper, otherwise the most
+    # similar chunks can all come from one of them.
+    balanced = agent_hint == "comparison" and len(selected) > 1
+
     try:
-        results = retriever.retrieve(query, request.top_k)
+        if balanced:
+            results = retriever.retrieve_balanced(query, request.top_k, selected)
+        else:
+            results = retriever.retrieve(query, request.top_k, selected)
 
     except EmbeddingError as error:
         raise HTTPException(
@@ -204,6 +240,11 @@ def ask_research_question(
         "agent": agent,
         "answer": answer,
         "sources": sources,
+        # Which papers actually contributed context, so the frontend can
+        # show what the answer was based on.
+        "papers_used": sorted({
+            source["filename"] for source in sources if source["filename"]
+        }),
     }
 
     # ---------------------------------------------

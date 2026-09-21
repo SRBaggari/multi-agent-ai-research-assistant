@@ -277,6 +277,30 @@ button.link-button {
   margin-top: 12px;
 }
 
+/* Paper selection */
+.select-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.paper-select {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.scope {
+  margin-bottom: 10px;
+}
+
 .success {
   background: #ecfdf5;
   border: 1px solid #a7f3d0;

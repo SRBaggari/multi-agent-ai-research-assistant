@@ -13,6 +13,8 @@ It:
 - generates embeddings with a Sentence-Transformer model
 - stores and searches those vectors in a FAISS index that persists to disk
 - retrieves the chunks most relevant to your question
+- lets you choose which papers a question applies to, so two or more can be
+  compared directly
 - routes the question to a specialised agent through a LangGraph supervisor
 - generates the answer with an OpenAI model using only the retrieved context
 - returns the sources with filename and page number
@@ -66,6 +68,35 @@ Anything else falls through to QA.
 
 `gap` is checked before `comparison`, so "compare the research gaps" is still
 treated as a gap question.
+
+### Choosing which papers to ask about
+
+Each paper in the dashboard list has a checkbox. Everything is selected by
+default, so a question searches all of them; untick a paper to leave it out.
+The line above the question box always says what the question covers.
+
+Comparison needs at least two papers selected, so the "Compare the methodology"
+example only appears once two are ticked. With a single paper the dashboard
+tells you to upload another one.
+
+Selecting papers also matters for retrieval quality. A plain similarity search
+can return every chunk from one paper and none from the other, which makes a
+comparison impossible. When the comparison agent runs across several papers,
+the retriever takes roughly `top_k / number-of-papers` chunks from each paper
+instead, so the agent always sees material from all of them.
+
+The API takes the same option:
+
+```json
+{
+  "query": "Compare the methodology of these papers.",
+  "top_k": 6,
+  "paper_ids": ["<paper-id-1>", "<paper-id-2>"]
+}
+```
+
+Leave `paper_ids` out to search everything. The response adds `papers_used`,
+listing the papers the answer was actually based on.
 
 Setting `USE_LLM_ROUTER=true` lets the model classify questions that match no
 keyword. It is off by default so routing stays deterministic, fast and free; if
@@ -453,8 +484,6 @@ Being honest about what this project does and does not do:
 - **Papers are global, not per-user.** Authentication works and activity is
   attributed to a user, but every account searches the same index. Auth is
   optional on the paper and research endpoints so Swagger stays usable.
-- **No paper filtering.** A question searches every uploaded paper; you cannot
-  restrict it to a chosen subset.
 - **Flat FAISS index.** `IndexFlatL2` is exact but scans everything, so search
   slows down once the corpus grows large.
 - **Deleting rebuilds the index.** Fine at this scale, but O(n) per delete.

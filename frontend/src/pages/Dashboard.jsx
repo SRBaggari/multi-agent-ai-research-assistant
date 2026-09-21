@@ -14,6 +14,9 @@ function Dashboard({ user, onLogout }) {
   const [health, setHealth] = useState(null);
   const [healthError, setHealthError] = useState("");
 
+  // Which papers the next question applies to. Empty = all of them.
+  const [selectedIds, setSelectedIds] = useState([]);
+
   // GET /health works even when MongoDB is down, so it is the reliable
   // way to know how many chunks are actually indexed.
   const refreshHealth = useCallback(async () => {
@@ -32,7 +35,17 @@ function Dashboard({ user, onLogout }) {
       setPapersError("");
 
       const data = await listPapers();
-      setPapers(data.papers || []);
+      const list = data.papers || [];
+      setPapers(list);
+
+      // Everything is selected by default, and papers that were deleted
+      // are dropped from the selection.
+      const ids = list.map((paper) => paper.paper_id);
+      setSelectedIds((current) =>
+        current.length === 0
+          ? ids
+          : current.filter((id) => ids.includes(id))
+      );
     } catch (error) {
       setPapers([]);
       setPapersError(getErrorMessage(error));
@@ -52,6 +65,20 @@ function Dashboard({ user, onLogout }) {
   }, [refreshAll]);
 
   const indexedChunks = health?.vector_store?.chunks ?? 0;
+
+  const toggleSelect = (paperId) =>
+    setSelectedIds((current) =>
+      current.includes(paperId)
+        ? current.filter((id) => id !== paperId)
+        : [...current, paperId]
+    );
+
+  const selectAll = (select) =>
+    setSelectedIds(select ? papers.map((paper) => paper.paper_id) : []);
+
+  const selectedPapers = papers.filter((paper) =>
+    selectedIds.includes(paper.paper_id)
+  );
 
   return (
     <div className="dashboard">
@@ -105,12 +132,19 @@ function Dashboard({ user, onLogout }) {
             loading={loadingPapers}
             error={papersError}
             indexedChunks={indexedChunks}
+            selectedIds={selectedIds}
+            onToggleSelect={toggleSelect}
+            onSelectAll={selectAll}
             onChanged={refreshAll}
           />
         </section>
 
         <section className="column wide">
-          <ChatBox indexedChunks={indexedChunks} />
+          <ChatBox
+            indexedChunks={indexedChunks}
+            totalPapers={papers.length}
+            selectedPapers={selectedPapers}
+          />
         </section>
       </main>
     </div>

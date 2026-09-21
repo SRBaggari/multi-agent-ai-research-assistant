@@ -193,10 +193,12 @@ export const deletePaper = async (paperId) => {
 // Research
 // --------------------------------------------------
 
-export const askQuestion = async (query, topK = 6) => {
+export const askQuestion = async (query, topK = 6, paperIds = null) => {
   const response = await API.post("/research/ask", {
     query,
     top_k: topK,
+    // null = search every uploaded paper
+    paper_ids: paperIds && paperIds.length ? paperIds : null,
   });
   return response.data;
 };
