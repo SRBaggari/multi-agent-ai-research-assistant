@@ -135,6 +135,7 @@ copy .env.example .env
 |---|---|
 | `OPENAI_API_KEY` | Your OpenAI key. Required for generating answers. |
 | `OPENAI_MODEL` | A model your key can use, e.g. `gpt-4o-mini`. |
+| `OPENAI_BASE_URL` | Optional. Blank = OpenAI. Set it to any OpenAI-compatible endpoint to use another provider. |
 | `MONGO_URI` | MongoDB connection string. |
 | `DATABASE_NAME` | Database name, default `research_assistant`. |
 | `JWT_SECRET` | Any long random string used to sign login tokens. |
@@ -168,8 +169,12 @@ Two terminals.
 ```powershell
 cd backend
 .venv\Scripts\Activate.ps1
-python -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload --reload-dir app
 ```
+
+`--reload-dir app` keeps the auto-reloader watching your own code only.
+Without it, uvicorn also watches `.venv` and restarts whenever it notices a
+package file, which reloads the embedding model for no reason.
 
 - API: <http://127.0.0.1:8000>
 - Swagger docs: <http://127.0.0.1:8000/docs>
@@ -254,6 +259,38 @@ Error responses:
 Authentication is **optional** on `/papers/*` and `/research/ask`: send a Bearer
 token and the activity is attributed to that user, or call them anonymously from
 Swagger. `/auth/me` always requires a token.
+
+---
+
+## Using a different LLM provider
+
+The project talks to OpenAI by default. Because the OpenAI SDK can point at
+any OpenAI-compatible endpoint, you can switch provider with two settings and
+no code changes — useful if your OpenAI account has no credits.
+
+In `backend\.env`:
+
+```
+# Groq (free tier)
+OPENAI_API_KEY=gsk_your_groq_key
+OPENAI_BASE_URL=https://api.groq.com/openai/v1
+OPENAI_MODEL=llama-3.3-70b-versatile
+```
+
+```
+# OpenRouter (has free models)
+OPENAI_API_KEY=sk-or-your_openrouter_key
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+OPENAI_MODEL=meta-llama/llama-3.3-70b-instruct:free
+```
+
+Then restart the backend. Leave `OPENAI_BASE_URL` blank to go back to OpenAI.
+
+`OPENAI_MODEL` must name a model the chosen provider actually offers; if it
+does not, `/research/ask` returns a 502 naming the model and the endpoint.
+
+Only the answer-generation step changes. Embeddings stay local
+(Sentence-Transformers), so retrieval and citations are unaffected.
 
 ---
 

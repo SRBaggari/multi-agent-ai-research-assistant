@@ -11,7 +11,7 @@ from the agents package.
 
 from openai import OpenAI
 
-from app.config import OPENAI_API_KEY, OPENAI_MODEL
+from app.config import OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL
 
 
 class LLMError(Exception):
@@ -36,7 +36,12 @@ def get_client() -> OpenAI:
         )
 
     if _client is None:
-        _client = OpenAI(api_key=OPENAI_API_KEY)
+        # base_url is only passed when configured, so the default
+        # behaviour (talking to OpenAI) is completely unchanged.
+        if OPENAI_BASE_URL:
+            _client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
+        else:
+            _client = OpenAI(api_key=OPENAI_API_KEY)
 
     return _client
 
@@ -99,16 +104,27 @@ def _explain_openai_error(error: Exception) -> str:
         )
 
     if status == 404 or "model_not_found" in text or "does not exist" in text:
+        where = OPENAI_BASE_URL or "OpenAI"
         return (
-            f"The model '{OPENAI_MODEL}' is not available for this API key. "
-            "Set OPENAI_MODEL in backend/.env to a model you can use "
-            "(for example gpt-4o-mini)."
+            f"The model '{OPENAI_MODEL}' is not available at {where}. "
+            "Set OPENAI_MODEL in backend/.env to a model this provider offers."
         )
 
-    if status == 429 or "rate_limit" in text or "insufficient_quota" in text:
+    # A 429 means two very different things, so tell them apart:
+    # no money on the account vs. too many requests per minute.
+    if "insufficient_quota" in text or "credit_balance_exhausted" in text \
+            or "no credits remaining" in text:
         return (
-            "OpenAI request was rejected (429): rate limit reached or the "
-            "account has no remaining quota."
+            "Your OpenAI account has no credits left, so the answer could not "
+            "be generated. Add credits at "
+            "https://platform.openai.com/settings/organization/billing/ "
+            "(the API key itself is valid)."
+        )
+
+    if status == 429 or "rate_limit" in text:
+        return (
+            "OpenAI is rate limiting the request (429). Wait a few seconds "
+            "and try again."
         )
 
     if "Connection" in text or "timeout" in text.lower():

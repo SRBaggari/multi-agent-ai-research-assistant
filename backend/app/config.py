@@ -70,6 +70,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 # "gpt-4o-mini" is cheap and available on every standard account.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 
+# Optional. Leave empty to talk to OpenAI itself.
+# Set it to any OpenAI-compatible endpoint (Groq, OpenRouter, a local
+# server, ...) to use that provider instead, with the same SDK.
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip()
+
 
 # --------------------------------------------------
 # MongoDB
