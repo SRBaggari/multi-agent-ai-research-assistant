@@ -1,4 +1,4 @@
-from app.agents.supervisor import ask_llm
+from app.agents.llm import ask_llm
 
 
 def identify_research_gaps(

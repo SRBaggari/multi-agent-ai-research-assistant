@@ -1,76 +1,107 @@
+import { useRef, useState } from "react";
 
-import { useState } from "react";
+import { uploadPaper, getErrorMessage } from "../services/api";
 
-import { uploadPaper } from "../services/api";
-
-
-function PaperUpload() {
-
+function PaperUpload({ onUploaded }) {
   const [file, setFile] = useState(null);
+  const [status, setStatus] = useState("");
+  const [warning, setWarning] = useState("");
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
 
-  const [message, setMessage] = useState("");
-
+  const inputRef = useRef(null);
 
   const handleUpload = async () => {
+    setStatus("");
+    setWarning("");
+    setError("");
 
     if (!file) {
-
-      setMessage(
-        "Please select a PDF first."
-      );
-
+      setError("Please select a PDF first.");
       return;
     }
 
     try {
+      setUploading(true);
 
-      setMessage("Uploading...");
+      const result = await uploadPaper(file);
 
-      const result =
-        await uploadPaper(file);
-
-      setMessage(
-        `Uploaded successfully. ${result.chunks} chunks created.`
+      setStatus(
+        `"${result.filename}" indexed: ` +
+          `${result.pages} pages, ${result.chunks} chunks.`
       );
 
-    } catch (error) {
+      // The upload itself succeeded, so a MongoDB problem is a warning,
+      // not an error.
+      if (result.warning) {
+        setWarning(result.warning);
+      }
 
-      console.error(error);
+      setFile(null);
+      if (inputRef.current) {
+        inputRef.current.value = "";
+      }
 
-      setMessage(
-        "Upload failed."
-      );
+      // Let the dashboard refresh the paper list.
+      if (onUploaded) {
+        onUploaded();
+      }
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setUploading(false);
     }
   };
 
-
   return (
-
     <div className="card">
-
-      <h2>Upload Research Paper</h2>
+      <h2>Upload a paper</h2>
 
       <input
+        ref={inputRef}
         type="file"
-        accept=".pdf"
-        onChange={(event) =>
-          setFile(event.target.files[0])
-        }
+        accept="application/pdf,.pdf"
+        data-testid="file-input"
+        disabled={uploading}
+        onChange={(event) => {
+          setFile(event.target.files[0] || null);
+          setStatus("");
+          setWarning("");
+          setError("");
+        }}
       />
 
       <button
         onClick={handleUpload}
+        disabled={uploading || !file}
+        data-testid="upload-button"
       >
-        Upload PDF
+        {uploading ? "Indexing PDF..." : "Upload PDF"}
       </button>
 
-      {message && (
-        <p>{message}</p>
+      {uploading && (
+        <p className="muted">
+          Extracting text, creating chunks and building embeddings.
+        </p>
       )}
 
+      {status && (
+        <div className="success" data-testid="upload-status">
+          {status}
+        </div>
+      )}
+      {warning && (
+        <div className="warning spaced" data-testid="upload-warning">
+          {warning}
+        </div>
+      )}
+      {error && (
+        <div className="error" role="alert" data-testid="upload-error">
+          {error}
+        </div>
+      )}
     </div>
   );
 }
-
 
 export default PaperUpload;

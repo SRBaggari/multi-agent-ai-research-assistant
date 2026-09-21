@@ -1,12 +1,30 @@
-from fastapi import APIRouter
+"""
+Research endpoint.
 
-from pydantic import BaseModel
+    query -> retriever -> context -> LangGraph supervisor -> agent -> answer
 
+Every failure along the way is converted into an HTTP error that
+explains what actually went wrong.
+"""
+
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from pydantic import BaseModel, Field
+
+from pymongo.errors import PyMongoError
+
+from app.api.auth import get_optional_user
+
+from app.agents.llm import LLMError
+from app.agents.supervisor import build_graph
+
+from app.rag.embeddings import EmbeddingError
 from app.rag.retriever import Retriever
+from app.rag.vector_store import VectorStoreError
 
-from app.agents.supervisor import (
-    build_graph
-)
+from app.database.mongodb import research_collection
 
 
 router = APIRouter(
@@ -20,29 +38,97 @@ retriever = Retriever()
 research_graph = build_graph()
 
 
+MAX_TOP_K = 20
+
+
 class ResearchQuery(BaseModel):
 
-    query: str
+    query: str = Field(
+        min_length=1,
+        max_length=2000,
+        description="The research question to ask about the uploaded papers."
+    )
 
-    top_k: int = 6
+    top_k: int = Field(
+        default=6,
+        ge=1,
+        le=MAX_TOP_K,
+        description="How many paper chunks to use as context."
+    )
 
 
 @router.post("/ask")
 def ask_research_question(
-    request: ResearchQuery
+    request: ResearchQuery,
+    current_user: dict | None = Depends(get_optional_user),
 ):
 
+    query = request.query.strip()
+
+    if not query:
+        raise HTTPException(
+            status_code=400,
+            detail="The question cannot be empty."
+        )
+
     # ---------------------------------------------
-    # Retrieve relevant chunks
+    # 1. Is there anything to search at all?
     # ---------------------------------------------
 
-    results = retriever.retrieve(
-        request.query,
-        request.top_k
-    )
+    try:
+        store_is_empty = retriever.is_empty()
+
+    except VectorStoreError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        ) from error
+
+    if store_is_empty:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No research papers have been uploaded yet. "
+                "Upload a PDF through POST /papers/upload first."
+            )
+        )
 
     # ---------------------------------------------
-    # Build context
+    # 2. Retrieve the relevant chunks
+    # ---------------------------------------------
+
+    try:
+        results = retriever.retrieve(query, request.top_k)
+
+    except EmbeddingError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        ) from error
+
+    except VectorStoreError as error:
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        ) from error
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Retrieval failed: {error}"
+        ) from error
+
+    if not results:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No relevant content was found in the uploaded papers "
+                "for this question."
+            )
+        )
+
+    # ---------------------------------------------
+    # 3. Build the context and the source list
     # ---------------------------------------------
 
     context_parts = []
@@ -51,82 +137,121 @@ def ask_research_question(
 
     for result in results:
 
-        text = result["text"]
+        text = result.get("text", "")
 
-        metadata = result["metadata"]
+        # .get() everywhere: a store written by an older version of the
+        # app could be missing a field, and that must not cause a 500.
+        metadata = result.get("metadata") or {}
 
-        filename = metadata[
-            "filename"
-        ]
+        filename = metadata.get("filename", "unknown.pdf")
 
-        page_number = metadata[
-            "page_number"
-        ]
+        page_number = metadata.get("page_number", 0)
 
         context_parts.append(
-            f"""
-SOURCE:
-{filename}
-PAGE:
-{page_number}
-
-CONTENT:
-{text}
-"""
+            f"SOURCE: {filename}\n"
+            f"PAGE: {page_number}\n\n"
+            f"CONTENT:\n{text}"
         )
 
         sources.append({
-
-            "paper_id":
-                metadata["paper_id"],
-
-            "filename":
-                filename,
-
-            "page_number":
-                page_number,
-
-            "text":
-                text
-
+            "paper_id": metadata.get("paper_id", ""),
+            "filename": filename,
+            "page_number": page_number,
+            "text": text,
+            "score": round(result.get("distance", 0.0), 4),
         })
 
-    context = "\n\n".join(
-        context_parts
-    )
+    context = "\n\n---\n\n".join(context_parts)
 
     # ---------------------------------------------
-    # Run multi-agent graph
+    # 4. Run the multi-agent graph
     # ---------------------------------------------
 
-    result = research_graph.invoke({
+    try:
 
-        "query":
-            request.query,
+        state = research_graph.invoke({
+            "query": query,
+            "context": context,
+            "result": "",
+            "agent": "",
+        })
 
-        "context":
-            context,
+    except LLMError as error:
+        # Missing API key, wrong model name, quota, network...
+        raise HTTPException(
+            status_code=502,
+            detail=str(error)
+        ) from error
 
-        "result":
-            "",
+    except Exception as error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"The multi-agent graph failed: {error}"
+        ) from error
 
-        "agent":
-            ""
+    answer = state.get("result", "")
 
-    })
+    agent = state.get("agent", "qa")
 
-    return {
+    if not answer:
+        raise HTTPException(
+            status_code=502,
+            detail="The agent did not return an answer."
+        )
 
-        "query":
-            request.query,
-
-        "agent":
-            result["agent"],
-
-        "answer":
-            result["result"],
-
-        "sources":
-            sources
-
+    response = {
+        "query": query,
+        "agent": agent,
+        "answer": answer,
+        "sources": sources,
     }
+
+    # ---------------------------------------------
+    # 5. Save the interaction (best effort)
+    # ---------------------------------------------
+
+    try:
+
+        research_collection.insert_one({
+            "query": query,
+            "agent": agent,
+            "answer": answer,
+            "sources": sources,
+            "user_id": (current_user or {}).get("user_id"),
+            "created_at": datetime.now(timezone.utc),
+        })
+
+    except PyMongoError:
+        # History is a nice-to-have; never fail the answer over it.
+        pass
+
+    return response
+
+
+@router.get("/history")
+def research_history(limit: int = 20):
+    """Return the most recent questions and answers."""
+
+    limit = max(1, min(limit, 100))
+
+    try:
+
+        documents = list(
+            research_collection
+            .find({}, {"_id": 0, "sources": 0})
+            .sort("created_at", -1)
+            .limit(limit)
+        )
+
+    except PyMongoError as error:
+        raise HTTPException(
+            status_code=500,
+            detail="Could not reach the database. Is MongoDB running?"
+        ) from error
+
+    for document in documents:
+        created_at = document.get("created_at")
+        if isinstance(created_at, datetime):
+            document["created_at"] = created_at.isoformat()
+
+    return {"count": len(documents), "history": documents}

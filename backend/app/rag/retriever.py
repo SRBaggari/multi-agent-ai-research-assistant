@@ -1,37 +1,35 @@
-from app.rag.embeddings import EmbeddingModel
+"""
+Retrieval step of the RAG pipeline.
 
-from app.rag.vector_store import VectorStore
+query -> embedding -> FAISS search -> relevant chunks (with metadata)
+"""
+
+from app.rag.embeddings import get_embedding_model
+from app.rag.vector_store import get_vector_store
 
 
 class Retriever:
 
     def __init__(self):
+        # Both of these are shared singletons, so a paper uploaded
+        # through /papers/upload is immediately searchable here.
+        self.embedding_model = get_embedding_model()
 
-        self.embedding_model = (
-            EmbeddingModel()
-        )
+        self.vector_store = get_vector_store()
 
-        self.vector_store = (
-            VectorStore()
-        )
+    def is_empty(self) -> bool:
+        """True when no paper has been indexed yet."""
 
-    def retrieve(
-        self,
-        query,
-        top_k=5
-    ):
+        self.vector_store.reload_if_changed()
 
-        query_embedding = (
-            self.embedding_model.encode(
-                [query]
-            )
-        )
+        return self.vector_store.is_empty()
 
-        results = (
-            self.vector_store.search(
-                query_embedding,
-                top_k
-            )
-        )
+    def retrieve(self, query: str, top_k: int = 5):
+        """Return the most relevant chunks for a query."""
 
-        return results
+        if not query or not query.strip():
+            return []
+
+        query_embedding = self.embedding_model.encode([query])
+
+        return self.vector_store.search(query_embedding, top_k)
